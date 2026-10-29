@@ -619,28 +619,35 @@ def key_findings():
     latest_income = income_gaps.sort_values("period").iloc[-1]
     largest_residual = residuals.loc[residuals["residual_pp"].abs().idxmax()]
     residual_share = (residuals["residual_pp"].abs() < 0.3).mean() * 100
-    identical_months = 0
-    sensitivity_months = 0
+    monthly_rankings = []
     for _, month in sensitivity.groupby("date"):
         top_2019 = month.nsmallest(3, "rank_2019w")["series"].tolist()
         top_2024 = month.nsmallest(3, "rank_2024w")["series"].tolist()
-        identical_months += top_2019 == top_2024
-        sensitivity_months += 1
-    assert sensitivity_months > 0, "no weight sensitivity months available"
-    identical_share = identical_months / sensitivity_months
-    if identical_share > 0.5:
-        sensitivity_sentence = (
-            f"- The top-three ranking was identical in {identical_months} of "
-            f"{sensitivity_months} months ({identical_share * 100:.1f}%), so the "
-            "main ranking is not sensitive to the choice of weights."
-        )
-    else:
-        differing_months = sensitivity_months - identical_months
-        sensitivity_sentence = (
-            f"- The top-three ranking depended on the weights and differed in "
-            f"{differing_months} of {sensitivity_months} months "
-            f"({differing_months / sensitivity_months * 100:.1f}%)."
-        )
+        monthly_rankings.append((month["date"].iloc[0], top_2019 == top_2024))
+    assert monthly_rankings, "no weight sensitivity months available"
+    latest_months_start = None
+    next_expected_date = sensitivity["date"].max()
+    for date, rankings_match in reversed(monthly_rankings):
+        if date != next_expected_date or not rankings_match:
+            break
+        latest_months_start = date
+        next_expected_date -= pd.DateOffset(months=1)
+    assert latest_months_start is not None, (
+        "latest month does not have matching top-three rankings"
+    )
+    differing_2025_months = [
+        date
+        for date, rankings_match in monthly_rankings
+        if date.year == 2025 and not rankings_match
+    ]
+    assert differing_2025_months, "no differing top-three rankings in 2025"
+    sensitivity_sentence = (
+        f"- The top three ranking is the same under both sets of weights in the "
+        f"latest months (from {latest_months_start:%B %Y} onward), but differs "
+        "in some months of 2025, so findings about the latest month are robust, "
+        "while no category is claimed to be the top contributor throughout "
+        "2025-2026."
+    )
 
     later_period_top_text = "; ".join(
         f"{row.series} contributed {row.contribution_pp:.2f} pp"

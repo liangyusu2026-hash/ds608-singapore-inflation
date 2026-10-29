@@ -9,4 +9,4 @@
 - The low-minus-high gap was -0.43 pp, and the middle-minus-high gap was 0.12 pp.
 - The residual was below 0.3 pp in 83.7% of months. The largest absolute residual was 0.45 pp in March 2022.
 - The largest residuals are in 2022, when prices of different categories moved very differently, so fixed basket weights are less exact.
-- The top-three ranking depended on the weights and differed in 10 of 20 months (50.0%).
+- The top three ranking is the same under both sets of weights in the latest months (from April 2026 onward), but differs in some months of 2025, so findings about the latest month are robust, while no category is claimed to be the top contributor throughout 2025-2026.
