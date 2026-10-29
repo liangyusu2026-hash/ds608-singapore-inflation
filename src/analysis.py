@@ -91,6 +91,16 @@ def contributions():
     # 3. Sort each series and get its CPI from 12 observations earlier
     monthly = monthly.sort_values(["series", "date"]).copy()
     monthly["cpi_12_months_ago"] = monthly.groupby("series")["cpi"].shift(12)
+    # 2019 weights require CPI indices on the matching 2019=100 basis.
+    cpi_2019_average = monthly.loc[monthly["date"].dt.year == 2019].groupby(
+        "series"
+    )["cpi"].mean()
+    monthly["cpi_2019base"] = (
+        monthly["cpi"] / monthly["series"].map(cpi_2019_average) * 100
+    )
+    monthly["cpi_2019base_12_months_ago"] = monthly.groupby("series")[
+        "cpi_2019base"
+    ].shift(12)
     analysis_rows = monthly[monthly["date"] >= ANALYSIS_START].copy()
 
     # 4. Match each division with All Items CPI from the same month
@@ -99,8 +109,19 @@ def contributions():
     ].merge(
         analysis_rows.loc[
             analysis_rows["series"] == "All Items",
-            ["date", "cpi_12_months_ago"],
-        ].rename(columns={"cpi_12_months_ago": "all_items_cpi_12_months_ago"}),
+            [
+                "date",
+                "cpi_12_months_ago",
+                "cpi_2019base_12_months_ago",
+            ],
+        ].rename(
+            columns={
+                "cpi_12_months_ago": "all_items_cpi_12_months_ago",
+                "cpi_2019base_12_months_ago": (
+                    "all_items_cpi_2019base_12_months_ago"
+                ),
+            }
+        ),
         on="date",
         how="inner",
     )
@@ -117,16 +138,27 @@ def contributions():
     division_rows.loc[use_2019_weights, "weight_used"] = division_rows.loc[
         use_2019_weights, "weight_2019"
     ]
+    cpi_used = division_rows["cpi"].copy()
+    cpi_used.loc[use_2019_weights] = division_rows.loc[
+        use_2019_weights, "cpi_2019base"
+    ]
+    cpi_12_months_ago_used = division_rows["cpi_12_months_ago"].copy()
+    cpi_12_months_ago_used.loc[use_2019_weights] = division_rows.loc[
+        use_2019_weights, "cpi_2019base_12_months_ago"
+    ]
+    all_items_cpi_12_months_ago_used = division_rows[
+        "all_items_cpi_12_months_ago"
+    ].copy()
+    all_items_cpi_12_months_ago_used.loc[use_2019_weights] = division_rows.loc[
+        use_2019_weights, "all_items_cpi_2019base_12_months_ago"
+    ]
     division_rows["weight_note"] = ""
     in_2024 = division_rows["date"].dt.year == 2024
     division_rows.loc[in_2024, "weight_note"] = "approximate (basket change)"
     division_rows["contribution_pp"] = (
         (division_rows["weight_used"] / 10000)
-        * (
-            division_rows["cpi"]
-            - division_rows["cpi_12_months_ago"]
-        )
-        / division_rows["all_items_cpi_12_months_ago"]
+        * (cpi_used - cpi_12_months_ago_used)
+        / all_items_cpi_12_months_ago_used
         * 100
     )
     result = division_rows[
@@ -199,6 +231,15 @@ def residual_check():
         f"Largest absolute residual: {largest_residual['residual_pp']:.3f} pp "
         f"in {largest_residual['date']:%b %Y}."
     )
+    for year, year_rows in result.groupby(result["date"].dt.year):
+        largest_year_residual = year_rows.loc[
+            year_rows["residual_pp"].abs().idxmax()
+        ]
+        print(
+            f"Largest absolute residual in {year}: "
+            f"{abs(largest_year_residual['residual_pp']):.3f} pp "
+            f"in {largest_year_residual['date']:%b %Y}."
+        )
 
     # 4. Store and share the table
     TABLES.mkdir(parents=True, exist_ok=True)
@@ -248,14 +289,34 @@ def weight_sensitivity():
     # 3. Calculate the same-month and 12-month-prior CPI for each series
     monthly = monthly.sort_values(["series", "date"]).copy()
     monthly["cpi_12_months_ago"] = monthly.groupby("series")["cpi"].shift(12)
+    cpi_2019_average = monthly.loc[monthly["date"].dt.year == 2019].groupby(
+        "series"
+    )["cpi"].mean()
+    monthly["cpi_2019base"] = (
+        monthly["cpi"] / monthly["series"].map(cpi_2019_average) * 100
+    )
+    monthly["cpi_2019base_12_months_ago"] = monthly.groupby("series")[
+        "cpi_2019base"
+    ].shift(12)
     analysis_rows = monthly[monthly["date"] >= pd.Timestamp("2025-01-01")]
     division_rows = analysis_rows[
         analysis_rows["series"].isin(division_names)
     ].merge(
         analysis_rows.loc[
             analysis_rows["series"] == "All Items",
-            ["date", "cpi_12_months_ago"],
-        ].rename(columns={"cpi_12_months_ago": "all_items_cpi_12_months_ago"}),
+            [
+                "date",
+                "cpi_12_months_ago",
+                "cpi_2019base_12_months_ago",
+            ],
+        ].rename(
+            columns={
+                "cpi_12_months_ago": "all_items_cpi_12_months_ago",
+                "cpi_2019base_12_months_ago": (
+                    "all_items_cpi_2019base_12_months_ago"
+                ),
+            }
+        ),
         on="date",
         how="inner",
     )
@@ -267,15 +328,19 @@ def weight_sensitivity():
     )
 
     # 4. Calculate contributions and rank each division under both weight sets
-    cpi_change = (
+    cpi_change_2019base = (
+        division_rows["cpi_2019base"]
+        - division_rows["cpi_2019base_12_months_ago"]
+    ) / division_rows["all_items_cpi_2019base_12_months_ago"] * 100
+    cpi_change_2024base = (
         division_rows["cpi"] - division_rows["cpi_12_months_ago"]
     ) / division_rows["all_items_cpi_12_months_ago"] * 100
     division_rows["contribution_2019w_pp"] = (
         division_rows["weight_2019"] / 10000
-    ) * cpi_change
+    ) * cpi_change_2019base
     division_rows["contribution_2024w_pp"] = (
         division_rows["weight_2024"] / 10000
-    ) * cpi_change
+    ) * cpi_change_2024base
     division_rows = division_rows.sort_values(["date", "series"]).copy()
     division_rows["rank_2019w"] = division_rows.groupby("date")[
         "contribution_2019w_pp"
@@ -644,7 +709,8 @@ def key_findings():
     sensitivity_sentence = (
         f"- The top three ranking is the same under both sets of weights in the "
         f"latest months (from {latest_months_start:%B %Y} onward), but differs "
-        "in some months of 2025, so findings about the latest month are robust, "
+        "in some months of 2025 and early 2026, so findings about the latest "
+        "month are robust, "
         "while no category is claimed to be the top contributor throughout "
         "2025-2026."
     )
@@ -700,12 +766,12 @@ def key_findings():
         (
             f"- The residual was below 0.3 pp in {residual_share:.1f}% of months. "
             f"The largest absolute residual was "
-            f"{largest_residual['residual_pp']:.2f} pp in "
+            f"{abs(largest_residual['residual_pp']):.2f} pp in "
             f"{largest_residual['date']:%B %Y}."
         ),
         (
-            "- The largest residuals are in 2022, when prices of different "
-            "categories moved very differently, so fixed basket weights are less exact."
+            "- The residual is close to zero in all years except 2019 and 2024, "
+            "which are the years when the comparison crosses a CPI basket change."
         ),
         sensitivity_sentence,
     ]
