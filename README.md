@@ -6,7 +6,7 @@ All data are public aggregate statistics with no personal information.
 | --- | --- | --- | --- |
 | cpi_2024base_monthly.csv | CPI, 2024 as Base Year, Monthly, data.gov.sg (SingStat) | 24 Oct 2026 | Singapore Open Data Licence |
 | cpi_by_income_group_lowest/middle/highest.csv | CPI by Household Income Group, 2024 as Base Year, Half-Yearly, SingStat Table Builder | 24 Oct 2026 | SingStat terms of use |
-| cpi_weights_2024.csv | Typed from Appendix III (pp. 29-36) of SingStat's Rebasing of the CPI (2024 as Base Year) information paper, saved as cpi_rebasing_paper_2024.pdf | 24 Oct 2026 | SingStat terms of use |
+| cpi_weights_2024.csv | Typed from Appendix III (pp. 29-36) of SingStat's Rebasing of the CPI (2024 as Base Year) information paper, available on SingStat's "CPI related information and rebasing papers | 24 Oct 2026 | SingStat terms of use |
 | coe_bidding_results.csv |	COE Bidding Results / Prices, LTA, data.gov.sg | 24 Oct 2026 | Singapore Open Data Licence |
 | hdb_rents.csv | Renting Out of Flats from Jan 2021, HDB, data.gov.sg | 24 Oct 2026 | Singapore Open Data Licence |
 
@@ -29,3 +29,5 @@ This reads data/raw/ and writes 5 files to data/processed/:
 - Income-group CPI is only half-yearly.
 - COE has no data for Apr-Jun 2020 (bidding suspended during the circuit breaker).
 - HDB rents are owner-declared and not verified by HDB; the 1-room median is based on very few rentals.
+- No base-year linking was done by us: the 2024-base series from data.gov.sg is already officially linked back to 1961, so the 2019-base series was not needed.
+- Income-group weights were not collected, because income groups are compared by their inflation rates, not by contributions.
