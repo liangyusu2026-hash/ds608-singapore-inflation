@@ -14,4 +14,14 @@ What I did myself / how I checked it:
 - Ran wrangle.py myself and checked the processed files against the raw data.
 - Spot-checked the typed weights against the rebasing paper PDF.
 - Made all commits and pull requests, and wrote the README data section.
-- All decisions on scope and methods were made by the group.
+- All decisions on scope and methods were agreed upon by the group.
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+## Amsyar
+
+Tool: ChatGPT (OpenAI)
+
+What I used it for: 
+- Explaining Plotly and Streamlit concepts and tools
+- Providing example code for dashboard features such as date-range sliders, category selectors and income-group comparisons.
+- Assisting with debugging, code organisation and interface improvements.
+- Highlighting important limitations of the processed data such as the expenditure weight change and residual differences that may affect objective interpretation of   visuals
