@@ -16,6 +16,15 @@ pip install -r requirements.txt
 python src/wrangle.py
 ```
 
+## Run the dashboard
+```bash
+pip install -r requirements.txt
+python src/wrangle.py
+python src/analysis.py
+streamlit run app.py
+Live app: https://ds608-sg-inflation.streamlit.app/
+```
+
 This reads data/raw/ and writes 5 files to data/processed/:
 
 - cpi_monthly_long.csv: one row per CPI series per month (date, series, level, level_name, parent, cpi, yoy_pct, mom_pct)
@@ -31,3 +40,5 @@ This reads data/raw/ and writes 5 files to data/processed/:
 - HDB rents are owner-declared and not verified by HDB; the 1-room median is based on very few rentals.
 - No base-year linking was done by us: the 2024-base series from data.gov.sg is already officially linked back to 1961, so the 2019-base series was not needed.
 - Income-group weights were not collected, because income groups are compared by their inflation rates, not by contributions.
+
+
