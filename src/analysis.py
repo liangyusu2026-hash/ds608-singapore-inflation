@@ -183,6 +183,128 @@ def contributions():
     return result
 
 
+def surge_vs_cooling():
+    """Compare category contribution averages and ranks across two periods.
+
+    Parameters
+    ----------
+    None
+
+    Returns
+    -------
+    pandas.DataFrame
+        Period averages, ranks, and category weights for the surge and cooling.
+    """
+    # 1. Read and inspect the saved contribution table
+    contributions_table = pd.read_csv(TABLES / "contributions_monthly.csv")
+    contributions_table["date"] = pd.to_datetime(
+        contributions_table["date"], format="%Y-%m-%d"
+    )
+    print(contributions_table.head())
+    contributions_table.info()
+
+    # 2. Select the surge and cooling periods
+    surge_start = pd.Timestamp("2022-01-01")
+    surge_end = pd.Timestamp("2023-12-01")
+    cooling_start = pd.Timestamp("2024-01-01")
+    latest_date = contributions_table["date"].max()
+    surge = contributions_table.loc[
+        contributions_table["date"].between(surge_start, surge_end)
+    ].copy()
+    cooling = contributions_table.loc[
+        contributions_table["date"].between(cooling_start, latest_date)
+    ].copy()
+    required_columns = ["date", "series", "weight_used", "contribution_pp"]
+    assert contributions_table[required_columns].notna().all().all(), (
+        "missing contribution inputs for surge and cooling comparison"
+    )
+    assert not contributions_table.duplicated(["date", "series"]).any(), (
+        "duplicate contribution category-month rows"
+    )
+    assert not surge.empty, "no contribution rows in the surge period"
+    assert not cooling.empty, "no contribution rows in the cooling period"
+
+    expected_surge_dates = pd.date_range(surge_start, surge_end, freq="MS")
+    expected_cooling_dates = pd.date_range(cooling_start, latest_date, freq="MS")
+    assert set(surge["date"].unique()) == set(expected_surge_dates), (
+        "surge period is missing contribution months"
+    )
+    assert set(cooling["date"].unique()) == set(expected_cooling_dates), (
+        "cooling period is missing contribution months"
+    )
+    assert surge.groupby("date")["series"].nunique().eq(DIVISION_COUNT).all(), (
+        "each surge month must have exactly 10 category contributions"
+    )
+    assert cooling.groupby("date")["series"].nunique().eq(DIVISION_COUNT).all(), (
+        "each cooling month must have exactly 10 category contributions"
+    )
+    assert surge.groupby("series")["weight_used"].nunique().eq(1).all(), (
+        "surge category weights must be consistent"
+    )
+    assert cooling.groupby("series")["weight_used"].nunique().eq(1).all(), (
+        "cooling category weights must be consistent"
+    )
+
+    # 3. Calculate period averages and ranks without comparing contribution sizes
+    surge_averages = (
+        surge.groupby("series", as_index=False)
+        .agg(
+            surge_avg_pp=("contribution_pp", "mean"),
+            weights_surge=("weight_used", "first"),
+        )
+        .sort_values(["surge_avg_pp", "series"], ascending=[False, True])
+        .reset_index(drop=True)
+    )
+    cooling_averages = (
+        cooling.groupby("series", as_index=False)
+        .agg(
+            cooling_avg_pp=("contribution_pp", "mean"),
+            weights_cooling=("weight_used", "first"),
+        )
+        .sort_values(["cooling_avg_pp", "series"], ascending=[False, True])
+        .reset_index(drop=True)
+    )
+    surge_averages["surge_rank"] = (
+        surge_averages["surge_avg_pp"].rank(method="first", ascending=False).astype(int)
+    )
+    cooling_averages["cooling_rank"] = (
+        cooling_averages["cooling_avg_pp"]
+        .rank(method="first", ascending=False)
+        .astype(int)
+    )
+    result = surge_averages.merge(
+        cooling_averages, on="series", how="inner", validate="one_to_one"
+    )
+    result = result[
+        [
+            "series",
+            "surge_avg_pp",
+            "cooling_avg_pp",
+            "surge_rank",
+            "cooling_rank",
+            "weights_surge",
+            "weights_cooling",
+        ]
+    ].sort_values(["surge_avg_pp", "series"], ascending=[False, True])
+    result = result.reset_index(drop=True)
+
+    # 4. Validate the output before saving it
+    assert len(result) == DIVISION_COUNT, "surge and cooling categories do not match"
+    assert not result.duplicated(["series"]).any(), (
+        "duplicate categories in surge and cooling comparison"
+    )
+    assert result.notna().all().all(), "missing surge and cooling output values"
+
+    # 5. Store and share the table
+    TABLES.mkdir(parents=True, exist_ok=True)
+    result.to_csv(TABLES / "surge_vs_cooling.csv", index=False)
+    print(
+        f"Saved {len(result):,} categories for Jan 2022-Dec 2023 and "
+        f"Jan 2024-{latest_date:%b %Y}"
+    )
+    return result
+
+
 def residual_check():
     """Compare summed division contributions with headline inflation.
 
@@ -502,7 +624,7 @@ def income_gap_drivers():
 
 
 def behind_the_numbers():
-    """Create indexed CPI comparisons with COE premiums and HDB rents.
+    """Create indexed Private Transport, COE, Accommodation, and rent comparisons.
 
     Parameters
     ----------
@@ -511,7 +633,7 @@ def behind_the_numbers():
     Returns
     -------
     tuple of pandas.DataFrame
-        Transport and COE table, followed by accommodation and HDB rent table.
+        Private Transport and COE table, followed by accommodation and HDB rent.
     """
     # 1. Read and inspect CPI, COE, and HDB rent data
     monthly = pd.read_csv(PROCESSED / "cpi_monthly_long.csv")
@@ -531,12 +653,12 @@ def behind_the_numbers():
         .agg(coe_premium=("premium", "mean"))
     )
 
-    # 3. Select the Transport CPI series and the Accommodation group CPI
-    transport = monthly.loc[
-        (monthly["series"] == "Transport")
-        & (monthly["level_name"] == "division")
+    # 3. Select the Private Transport group CPI and the Accommodation group CPI
+    private_transport = monthly.loc[
+        (monthly["series"] == "Private Transport")
+        & (monthly["level_name"] == "group")
         & (monthly["date"] >= COMPARISON_START),
-        ["date", "cpi"],
+        ["date", "cpi", "parent"],
     ].rename(columns={"cpi": "transport_cpi"})
     accommodation = monthly.loc[
         (monthly["series"] == "Accommodation")
@@ -549,7 +671,16 @@ def behind_the_numbers():
         & (rents["date"] >= COMPARISON_START),
         ["date", "median_rent"],
     ]
-    assert not transport.duplicated(["date"]).any(), "duplicate Transport CPI month"
+    assert len(private_transport) > 0, "no Private Transport CPI months found"
+    assert private_transport["parent"].eq("Transport").all(), (
+        "Private Transport must have Transport as its parent"
+    )
+    assert private_transport["transport_cpi"].notna().all(), (
+        "missing Private Transport CPI values"
+    )
+    assert not private_transport.duplicated(["date"]).any(), (
+        "duplicate Private Transport CPI month"
+    )
     assert not accommodation.duplicated(["date"]).any(), (
         "duplicate Accommodation CPI month"
     )
@@ -557,7 +688,11 @@ def behind_the_numbers():
 
     # 4. Combine each pair of monthly series, then set the February 2021 index to 100
     transport_table = pd.merge(
-        transport, coe_monthly, on="date", how="inner", validate="one_to_one"
+        private_transport[["date", "transport_cpi"]],
+        coe_monthly,
+        on="date",
+        how="inner",
+        validate="one_to_one",
     )
     accommodation_table = pd.merge(
         accommodation, all_rents, on="date", how="inner", validate="one_to_one"
@@ -568,7 +703,9 @@ def behind_the_numbers():
     accommodation_base = accommodation_table.loc[
         accommodation_table["date"] == COMPARISON_START
     ]
-    assert len(transport_base) == 1, "February 2021 Transport/COE baseline is missing"
+    assert len(transport_base) == 1, (
+        "February 2021 Private Transport/COE baseline is missing"
+    )
     assert len(accommodation_base) == 1, (
         "February 2021 Accommodation/HDB baseline is missing"
     )
@@ -596,14 +733,18 @@ def behind_the_numbers():
     ].sort_values("date").reset_index(drop=True)
 
     # 5. Validate both output tables before saving them
-    assert not transport_table.duplicated(["date"]).any(), "duplicate transport date"
+    assert not transport_table.duplicated(["date"]).any(), (
+        "duplicate Private Transport/COE date"
+    )
     assert not accommodation_table.duplicated(["date"]).any(), (
         "duplicate accommodation date"
     )
     assert transport_table.loc[
         transport_table["date"] == COMPARISON_START,
         ["transport_cpi_index", "coe_premium_index"],
-    ].eq(100).all().all(), "transport comparison baseline should equal 100"
+    ].eq(100).all().all(), (
+        "Private Transport/COE comparison baseline should equal 100"
+    )
     assert accommodation_table.loc[
         accommodation_table["date"] == COMPARISON_START,
         ["accommodation_cpi_index", "hdb_rent_index"],
@@ -616,7 +757,7 @@ def behind_the_numbers():
         TABLES / "accommodation_vs_hdb_rent.csv", index=False
     )
     print(
-        f"Saved {len(transport_table):,} transport rows, "
+        f"Saved {len(transport_table):,} Private Transport/COE rows, "
         f"{transport_table['date'].min():%b %Y} to "
         f"{transport_table['date'].max():%b %Y}"
     )
@@ -643,9 +784,12 @@ def key_findings():
     # 1. Read the result tables needed for the summary
     inflation = pd.read_csv(TABLES / "inflation_by_category.csv")
     contributions_table = pd.read_csv(TABLES / "contributions_monthly.csv")
+    surge_vs_cooling_table = pd.read_csv(TABLES / "surge_vs_cooling.csv")
     income_gaps = pd.read_csv(TABLES / "income_group_inflation_gaps.csv")
+    income_gap_drivers_table = pd.read_csv(TABLES / "income_gap_drivers.csv")
     residuals = pd.read_csv(TABLES / "contribution_residual_check.csv")
     sensitivity = pd.read_csv(TABLES / "weight_sensitivity.csv")
+    transport_table = pd.read_csv(TABLES / "transport_vs_coe.csv")
     inflation["date"] = pd.to_datetime(inflation["date"], format="%Y-%m-%d")
     contributions_table["date"] = pd.to_datetime(
         contributions_table["date"], format="%Y-%m-%d"
@@ -653,6 +797,9 @@ def key_findings():
     residuals["date"] = pd.to_datetime(residuals["date"], format="%Y-%m-%d")
     sensitivity["date"] = pd.to_datetime(
         sensitivity["date"], format="%Y-%m-%d"
+    )
+    transport_table["date"] = pd.to_datetime(
+        transport_table["date"], format="%Y-%m-%d"
     )
     print(inflation.head())
     inflation.info()
@@ -680,8 +827,65 @@ def key_findings():
         "peak month needs three divisions in the 2019-2023 period"
     )
 
-    # 3. Select the latest income-group rates and summarize the residual check
+    # 3. Find cumulative category price changes and latest income-group rates
+    category_cpi = inflation[inflation["series"] != "All Items"].sort_values(
+        ["series", "date"]
+    )
+    assert not category_cpi.empty, "no category CPI values available"
+    assert category_cpi[["series", "date", "cpi"]].notna().all().all(), (
+        "missing category CPI values"
+    )
+    category_first = category_cpi.groupby("series", as_index=False).first()
+    category_last = category_cpi.groupby("series", as_index=False).last()
+    assert category_first["date"].nunique() == 1, (
+        "categories must share a common start date"
+    )
+    assert category_last["date"].nunique() == 1, (
+        "categories must share a common latest date"
+    )
+    category_changes = category_first[["series", "cpi"]].merge(
+        category_last[["series", "cpi"]],
+        on="series",
+        how="inner",
+        validate="one_to_one",
+        suffixes=("_first", "_last"),
+    )
+    category_changes["change_pct"] = (
+        category_changes["cpi_last"] / category_changes["cpi_first"] - 1
+    ) * 100
+    top_cumulative_categories = category_changes.nlargest(3, "change_pct")
+    assert len(top_cumulative_categories) == 3, (
+        "fewer than three categories have cumulative price changes"
+    )
+
     latest_income = income_gaps.sort_values("period").iloc[-1]
+    latest_period = latest_income["period"]
+    latest_driver_rows = income_gap_drivers_table.loc[
+        income_gap_drivers_table["period"] == latest_period
+    ].copy()
+    assert len(latest_driver_rows) == DIVISION_COUNT, (
+        "latest half-year must have exactly 10 category gaps"
+    )
+    assert latest_driver_rows["rate_gap_low_minus_high_pp"].notna().all(), (
+        "missing latest half-year category gaps"
+    )
+    largest_negative_gaps = latest_driver_rows.nsmallest(
+        2, "rate_gap_low_minus_high_pp"
+    )
+    largest_positive_gap = latest_driver_rows.nlargest(
+        1, "rate_gap_low_minus_high_pp"
+    ).iloc[0]
+    assert largest_negative_gaps["rate_gap_low_minus_high_pp"].lt(0).all(), (
+        "latest half-year must have two negative category gaps"
+    )
+    assert largest_positive_gap["rate_gap_low_minus_high_pp"] > 0, (
+        "latest half-year must have a positive category gap"
+    )
+    assert latest_income["period"] == income_gap_drivers_table["period"].max(), (
+        "overall and category income gaps must use the same latest half-year"
+    )
+
+    # 4. Summarize the residual check and weight sensitivity
     largest_residual = residuals.loc[residuals["residual_pp"].abs().idxmax()]
     residual_share = (residuals["residual_pp"].abs() < 0.3).mean() * 100
     monthly_rankings = []
@@ -715,6 +919,7 @@ def key_findings():
         "2025-2026."
     )
 
+    # 5. Build one short sentence for each dashboard page from saved tables
     later_period_top_text = "; ".join(
         f"{row.series} contributed {row.contribution_pp:.2f} pp"
         for row in later_period_contributions.itertuples(index=False)
@@ -724,7 +929,94 @@ def key_findings():
         for row in earlier_period_contributions.itertuples(index=False)
     )
 
-    # 4. Write the findings in descriptive wording only
+    latest_top_categories = ", ".join(
+        later_period_contributions["series"].iloc[:2]
+    ) + f", and {later_period_contributions['series'].iloc[2]}"
+    surge_top = surge_vs_cooling_table.nsmallest(3, "surge_rank")["series"].tolist()
+    cooling_top = surge_vs_cooling_table.nsmallest(3, "cooling_rank")["series"].tolist()
+    surge_top_text = ", ".join(surge_top[:2]) + f", and {surge_top[2]}"
+    cooling_top_text = ", ".join(cooling_top[:2]) + f", and {cooling_top[2]}"
+    surge_cooling_sentence = (
+        f"{surge_top_text} ranked highest in the 2022-23 surge, while "
+        f"{cooling_top_text} ranked highest in the 2024-{latest_date:%y} cooling."
+    )
+    cumulative_start = category_first["date"].iloc[0]
+    top_cumulative_names = top_cumulative_categories["series"].tolist()
+    top_cumulative_values = top_cumulative_categories["change_pct"].tolist()
+    top_cumulative_text = (
+        f"{top_cumulative_names[0]} ({top_cumulative_values[0]:.1f}%), "
+        f"{top_cumulative_names[1]} ({top_cumulative_values[1]:.1f}%), and "
+        f"{top_cumulative_names[2]} ({top_cumulative_values[2]:.1f}%)"
+    )
+    cumulative_sentence = (
+        f"Since {cumulative_start:%B %Y}, {top_cumulative_text} had the "
+        f"largest category CPI increases through {latest_date:%B %Y}."
+    )
+    negative_gap_text = (
+        f"{largest_negative_gaps.iloc[0]['series']} "
+        f"({largest_negative_gaps.iloc[0]['rate_gap_low_minus_high_pp']:+.2f} pp) "
+        f"and {largest_negative_gaps.iloc[1]['series']} "
+        f"({largest_negative_gaps.iloc[1]['rate_gap_low_minus_high_pp']:+.2f} pp)"
+    )
+    overall_gap = income_gaps.loc[income_gaps["period"] == latest_period].iloc[0][
+        "gap_low_minus_high_pp"
+    ]
+    income_gap_sentence = (
+        f"In {latest_period}, the overall low-minus-high gap was {overall_gap:+.2f} pp; "
+        f"the largest category gaps were {negative_gap_text} on the negative side "
+        f"and {largest_positive_gap['series']} "
+        f"({largest_positive_gap['rate_gap_low_minus_high_pp']:+.2f} pp) "
+        "on the positive side."
+    )
+    transport_latest = transport_table.sort_values("date").iloc[-1]
+    transport_first = transport_table.sort_values("date").iloc[0]
+    assert transport_first["date"] == COMPARISON_START, (
+        "Private Transport/COE comparison must start in February 2021"
+    )
+    assert transport_table[
+        ["transport_cpi_index", "coe_premium_index"]
+    ].notna().all().all(), "missing Private Transport/COE index values"
+    private_transport_direction = (
+        transport_latest["transport_cpi_index"]
+        - transport_first["transport_cpi_index"]
+    )
+    coe_direction = (
+        transport_latest["coe_premium_index"]
+        - transport_first["coe_premium_index"]
+    )
+    if private_transport_direction > 0 and coe_direction > 0:
+        movement_text = "both rose"
+    elif private_transport_direction < 0 and coe_direction < 0:
+        movement_text = "both fell"
+    elif private_transport_direction == 0 and coe_direction == 0:
+        movement_text = "both remained unchanged"
+    else:
+        movement_text = "moved in opposite directions"
+    behind_sentence = (
+        f"Since February 2021, the Private Transport CPI and COE premium indexes "
+        f"{movement_text}, reaching {transport_latest['transport_cpi_index']:.1f} "
+        f"and {transport_latest['coe_premium_index']:.1f}, respectively, in "
+        f"{transport_latest['date']:%B %Y}."
+    )
+    page_findings = [
+        (
+            "**Overview & Category Explorer:** "
+            f"Headline year-on-year inflation was {latest_headline['yoy_pct']:.2f}% "
+            f"in {latest_date:%B %Y}, with {latest_top_categories} the top "
+            "contributing categories."
+        ),
+        f"**What Drove Inflation?:** {surge_cooling_sentence}",
+        f"**Cumulative Price Changes:** {cumulative_sentence}",
+        f"**Rich vs Poor:** {income_gap_sentence}",
+        f"**Behind the Numbers:** {behind_sentence}",
+    ]
+    page_bodies = [finding.split(":** ", 1)[1] for finding in page_findings]
+    assert len(page_findings) == 5, "exactly five dashboard page findings are required"
+    assert all(len(sentence.split()) < 40 for sentence in page_bodies), (
+        "each dashboard page finding must be under 40 words"
+    )
+
+    # 6. Write the findings in descriptive wording only
     findings = [
         "# Key Findings",
         "",
@@ -774,16 +1066,23 @@ def key_findings():
             "which are the years when the comparison crosses a CPI basket change."
         ),
         sensitivity_sentence,
+        "",
+        "## Page findings",
+        *page_findings,
     ]
     text = "\n".join(findings) + "\n"
 
-    # 5. Validate the summary inputs and store the findings
+    # 7. Validate the summary inputs and store the findings
     assert len(headline) > 0, "no headline inflation values available"
     assert len(income_gaps) > 0, "no income-group periods available"
-    assert "caused" not in text.lower()
-    assert "drove" not in text.lower()
-    assert "led to" not in text.lower()
-    assert "is correlated with" not in text.lower()
+    page_findings_index = findings.index("## Page findings")
+    prose = "\n".join(findings[2:page_findings_index] + page_bodies)
+    assert "caused" not in prose.lower()
+    assert "drove" not in prose.lower()
+    assert "led to" not in prose.lower()
+    assert "is correlated with" not in prose.lower()
+    assert "accounts for" not in prose.lower()
+    assert "explains" not in prose.lower()
     TABLES.mkdir(parents=True, exist_ok=True)
     (TABLES / "key_findings.md").write_text(text, encoding="utf-8")
     print(
@@ -796,6 +1095,7 @@ def key_findings():
 if __name__ == "__main__":
     category_inflation()
     contributions()
+    surge_vs_cooling()
     residual_check()
     weight_sensitivity()
     income_group_gaps()
