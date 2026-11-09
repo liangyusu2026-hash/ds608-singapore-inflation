@@ -1,4 +1,13 @@
 # Who Feels Inflation Most? Singapore CPI by Category and Household Income
+Live app: https://ds608-sg-inflation.streamlit.app/
+
+## Run the dashboard
+```bash
+pip install -r requirements.txt
+python src/wrangle.py
+python src/analysis.py
+streamlit run app.py
+```
 ## Data
 All data are public aggregate statistics with no personal information.
 
@@ -6,7 +15,7 @@ All data are public aggregate statistics with no personal information.
 | --- | --- | --- | --- |
 | cpi_2024base_monthly.csv | CPI, 2024 as Base Year, Monthly, data.gov.sg (SingStat) | 24 Oct 2026 | Singapore Open Data Licence |
 | cpi_by_income_group_lowest/middle/highest.csv | CPI by Household Income Group, 2024 as Base Year, Half-Yearly, SingStat Table Builder | 24 Oct 2026 | SingStat terms of use |
-| cpi_weights_2024.csv | Typed from Appendix III (pp. 29-36) of SingStat's Rebasing of the CPI (2024 as Base Year) information paper, available on SingStat's "CPI related information and rebasing papers | 24 Oct 2026 | SingStat terms of use |
+| cpi_weights_2024.csv | Typed from Appendix III (pp. 29-36) of SingStat's Rebasing of the CPI (2024 as Base Year) information paper, available on SingStat's "CPI related information and rebasing papers" | 24 Oct 2026 | SingStat terms of use |
 | coe_bidding_results.csv |	COE Bidding Results / Prices, LTA, data.gov.sg | 24 Oct 2026 | Singapore Open Data Licence |
 | hdb_rents.csv | Renting Out of Flats from Jan 2021, HDB, data.gov.sg | 24 Oct 2026 | Singapore Open Data Licence |
 
@@ -16,14 +25,6 @@ pip install -r requirements.txt
 python src/wrangle.py
 ```
 
-## Run the dashboard
-```bash
-pip install -r requirements.txt
-python src/wrangle.py
-python src/analysis.py
-streamlit run app.py
-Live app: https://ds608-sg-inflation.streamlit.app/
-```
 
 This reads data/raw/ and writes 5 files to data/processed/:
 
