@@ -218,6 +218,14 @@ with tab2:
     )
 
 
+    # Warn users when selecting a month in 2024
+    if pd.to_datetime(selected_month).year == 2024:
+        st.warning(
+            "2024 contribution estimates use approximate transitional weights. "
+            "Interpret these results with additional caution."
+        )
+
+
     # Filter and rank expenditure categories
     monthly_data = contributions[
         contributions["date"] == selected_month
@@ -291,6 +299,14 @@ with tab2:
         format_func=lambda d: d.strftime("%b %Y")
     )
 
+    # Warn users whenever the selected range includes 2024
+    if range_start.year <= 2024 <= range_end.year:
+        st.warning(
+            "The selected period includes 2024, when approximate "
+            "transitional CPI expenditure weights were used. "
+            "Interpret contribution estimates with additional caution."
+        )
+
     # Filter the data to the selected period
     filtered_contributions = contributions_time[
         (contributions_time["date"] >= pd.Timestamp(range_start))
@@ -341,14 +357,6 @@ with tab2:
         "The expenditure basket was updated around 2024, so contribution "
         "magnitudes across different weighting periods are not directly comparable."
     )
-
-    # Warn users when examining the transitional year
-    if pd.to_datetime(selected_month).year == 2024:
-        st.warning(
-            "2024 contribution estimates use approximate transitional weights. "
-            "Interpret these results with additional caution."
-        )
-
 #_____________________________________________________________
 # Dashboard Section: Income Group Inflation Comparison
 
