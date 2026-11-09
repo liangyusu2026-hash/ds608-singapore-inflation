@@ -25,3 +25,17 @@ What I used it for:
 - Providing example code for dashboard features such as date-range sliders, category selectors and income-group comparisons.
 - Assisting with debugging, code organisation and interface improvements.
 - Highlighting important limitations of the processed data such as the expenditure weight change and residual differences that may affect objective interpretation of   visuals
+
+## Jiang Liuru
+
+Tools: Claude (Anthropic), used through claude.ai; GitHub Copilot Chat (agent mode) in VS Code.
+
+What I used them for:
+- Claude: explained the group's task split and the project guide, and helped me draft a detailed prompt for my analysis tasks; gave step-by-step Git instructions (pull, branch, stash, push).
+- Copilot: implemented the Private Transport change, the surge_vs_cooling() table and the page findings in key_findings(), then ran the pipeline and recomputed the numbers independently. Also added these documentation entries and pushed them.
+
+What I did myself / how I checked it:
+- Reviewed the full diff of src/analysis.py before committing.
+- Reran wrangle.py and analysis.py myself and checked each page finding against the output tables.
+- Checked that the findings use descriptive, not causal, wording.
+- Made the commit and pull request myself.
