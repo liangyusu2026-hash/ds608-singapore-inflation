@@ -1,305 +1,143 @@
+"""Streamlit dashboard: Who Feels Inflation Most?
+
+This file only lays out the page. Data loading is in src/load_data.py,
+calculations are in src/metrics.py and charts are in src/plots.py.
+Run with: streamlit run app.py
+"""
 import pandas as pd
-import plotly.express as px
 import streamlit as st
 
-# Load the processed data
-df = pd.read_csv("outputs/tables/inflation_by_category.csv")
+from src import load_data, metrics, plots
 
-#____________________________________________________________
-# Dashboard Section: Category Explorer
-
-# Convert the "date" column to datetime format for proper plotting
-df["date"] = pd.to_datetime(df["date"])
-
-# Retrieve Singapore's headline CPI observations
-headline = df[df["series"] == "All Items"]
-
-# Find the latest available headline CPI observation
-latest_headline = headline.sort_values("date").iloc[-1]
-
-# Extract the latest inflation rate and CPI index
-latest_inflation = latest_headline["yoy_pct"]
-latest_cpi = latest_headline["cpi"]
-latest_month = latest_headline["date"].strftime("%B %Y")
-
-# Define a dictionary to map measure names to more
-#  reader-friendly labels
-measure_labels = {
-    "cpi": "CPI Index (2024 = 100)",
-    "yoy_pct": "Year-on-Year Inflation (%)"
-}
-
-# Display a dashboard title
-st.title("Singapore CPI Dashboard")
-
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "Overview & Category Explorer",
-    "What Drove Inflation?",
-    "Cumulative Price Changes",
-    "Rich vs Poor",
-    "Behind the Numbers"
-])
-with tab1:
-
-    # Provide context for the latest headline inflation figures
-    st.info(
-    "Headline year-on-year inflation was 2.35% in August 2026, "
-    "with Transport, Food, and Housing & Utilities "
-    "the top contributing categories."
-    )
-
-# Display the latest headline inflation figures
-    st.subheader(f"Latest Headline Inflation — {latest_month}")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.metric(
-            "Year-on-Year Inflation",
-            f"{latest_inflation:.2f}%"
-        )
-
-    with col2:
-        st.metric(
-            "CPI Index (2024 = 100)",
-            f"{latest_cpi:.2f}"
-        )
+INCOME_GROUPS = ["Lowest 20%", "Middle 60%", "Highest 20%"]
 
 
-    # Load monthly expenditure-category contributions
-    overview_contributions = pd.read_csv(
-        "outputs/tables/contributions_monthly.csv"
-    )
-
-    # Convert the date column to datetime
-    overview_contributions["date"] = pd.to_datetime(
-        overview_contributions["date"]
-    )
-
-    # Find the latest available contribution month
-    latest_contribution_month = overview_contributions["date"].max()
-
-    # Keep only the latest month's observations
-    latest_month_data = overview_contributions[
-        overview_contributions["date"] == latest_contribution_month
-    ]
-
-    # Find the three largest contributors
-    latest_top_three = latest_month_data.nlargest(
-        3, "contribution_pp"
-    )
-
-    # Display the results
-    st.markdown(
-        f"#### Top Three Inflation Contributors — "
-        f"{latest_contribution_month:%B %Y}"
-    )
-
-    for _, row in latest_top_three.iterrows():
+def show_top_contributors(top_rows):
+    """Write each top contributor and its contribution in pp."""
+    for _, row in top_rows.iterrows():
         st.write(
             f"**{row['series']}**: "
             f"{row['contribution_pp']:.2f} percentage points"
         )
 
-    # Let users choose how to explore the CPI data
+
+def render_headline_metrics(category_inflation):
+    """Show the latest headline YoY inflation and CPI index."""
+    latest = metrics.get_latest_headline(category_inflation)
+    st.subheader(f"Latest Headline Inflation — {latest['date']:%B %Y}")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Year-on-Year Inflation", f"{latest['yoy_pct']:.2f}%")
+    with col2:
+        st.metric(plots.MEASURE_LABELS["cpi"], f"{latest['cpi']:.2f}")
+
+
+def render_latest_top_contributors(contributions):
+    """Show the three largest contributors in the latest month."""
+    latest_month = contributions["date"].max()
+    month_data = metrics.get_month_contributions(contributions, latest_month)
+    st.markdown(
+        f"#### Top Three Inflation Contributors — {latest_month:%B %Y}"
+    )
+    show_top_contributors(metrics.get_top_contributors(month_data))
+
+
+def render_category_explorer(category_inflation):
+    """Let users pick categories, a measure and dates, then draw the trend."""
     view = st.radio(
         "Choose a dashboard view",
-        ["Overall trend", "Compare categories"]
+        ["Overall trend", "Compare categories"],
     )
-
-    # Let the user select between viewing the overall trend
-    #  or comparing specific categories
     if view == "Overall trend":
         categories = ["All Items"]
-
     else:
         categories = st.multiselect(
             "Choose CPI categories",
-            df["series"].unique(),
-            default=["Food", "Transport"]
+            category_inflation["series"].unique(),
+            default=["Food", "Transport"],
         )
 
-    # Let the user select which measure to display
     measure = st.selectbox(
         "Choose a measure",
         ["cpi", "yoy_pct"],
-        format_func=lambda x: measure_labels[x]
+        format_func=lambda x: plots.MEASURE_LABELS[x],
     )
-
-    # Let the user choose a starting date
     start_date = st.date_input(
-        "Start date",
-        value=df["date"].min().date()
+        "Start date", value=category_inflation["date"].min().date()
     )
-
-    # Let the user choose an ending date
     end_date = st.date_input(
-        "End date",
-        value=df["date"].max().date()
+        "End date", value=category_inflation["date"].max().date()
     )
 
-    # Validate that the starting date is not later than the
-    # ending date with a boolean variable
-    valid_dates = start_date <= end_date
-
-    # Filter the DataFrame based on the selected categories,
-    # measure, and date range
-    selected_category = df[
-        (df["series"].isin(categories))
-        & (df["date"] >= pd.Timestamp(start_date))
-        & (df["date"] <= pd.Timestamp(end_date))
-    ]
-    # Set the chart title based on the selected view
-    if view == "Overall trend":
-        chart_title = f"Singapore Overall {measure_labels[measure]}"
-    else:
-        chart_title = f"Singapore {measure_labels[measure]} by Category"
-
-    # Create the graph for the selected category
-    fig = px.line(
-        data_frame=selected_category,
-        x="date",
-        y=measure,
-        color="series",
-        title=chart_title,
-        labels={
-            "date": "Date",
-            "series": "Expenditure Category",
-            "cpi": measure_labels["cpi"],
-            "yoy_pct": measure_labels["yoy_pct"]
-        }
-    )
-
-    # Add a zero-inflation reference line
-    if measure == "yoy_pct":
-        fig.add_hline(
-            y=0,
-            line_dash="dash",
-            line_color="gray"
-        )
-
-    # Display the graph only if categories are selected
-    if not valid_dates:
+    if start_date > end_date:
         st.error("Starting date cannot be later than ending date.")
-
-    elif len(categories) == 0:
+        return
+    if len(categories) == 0:
         st.warning("Please select at least one CPI category.")
+        return
 
+    if view == "Overall trend":
+        title = f"Singapore Overall {plots.MEASURE_LABELS[measure]}"
     else:
-        st.plotly_chart(fig, use_container_width=True)
+        title = f"Singapore {plots.MEASURE_LABELS[measure]} by Category"
+    selected = metrics.filter_categories(
+        category_inflation, categories, start_date, end_date
+    )
+    fig = plots.create_category_trend_chart(selected, measure, title)
+    st.plotly_chart(fig, use_container_width=True)
 
-#_____________________________________________________________
-# Dashboard Section: Inflation Contributions
 
-with tab2:
-    # Display a subheader for the inflation contributions section
-    st.subheader("What Drove Inflation?")
-
-    # Provide context for the inflation contributions
+def render_overview_tab(category_inflation, contributions):
+    """Tab 1: headline numbers, latest top contributors, category explorer."""
     st.info(
-        "Transport, Food, and Housing & Utilities ranked highest "
-        "in the 2022–23 surge, while Housing & Utilities, Food, "
-        "and Transport ranked highest in the 2024–26 cooling."
+        "Headline year-on-year inflation was 2.35% in August 2026, "
+        "with Transport, Food, and Housing & Utilities "
+        "the top contributing categories."
     )
+    render_headline_metrics(category_inflation)
+    render_latest_top_contributors(contributions)
+    render_category_explorer(category_inflation)
 
-    # Load monthly inflation contributions
-    contributions = pd.read_csv(
-        "outputs/tables/contributions_monthly.csv"
-    )
 
-    # Allow users to select a month
+def render_single_month_contributions(contributions):
+    """Let users pick a month and show that month's contributions."""
     months = sorted(contributions["date"].unique())
-
     selected_month = st.selectbox(
         "Choose a month to examine",
         months,
-        index=months.index("2022-09-01"),
-        format_func=lambda x: pd.to_datetime(x).strftime("%B %Y")
+        index=months.index(pd.Timestamp("2022-09-01")),
+        format_func=lambda x: pd.Timestamp(x).strftime("%B %Y"),
     )
-
-
-    # Warn users when selecting a month in 2024
-    if pd.to_datetime(selected_month).year == 2024:
+    selected_month = pd.Timestamp(selected_month)
+    if selected_month.year == 2024:
         st.warning(
             "2024 contribution estimates use approximate transitional weights. "
             "Interpret these results with additional caution."
         )
 
-
-    # Filter and rank expenditure categories
-    monthly_data = contributions[
-        contributions["date"] == selected_month
-    ]
-
-    monthly_data = monthly_data.sort_values(
-        "contribution_pp",
-        ascending=True
-    )
-
-        # Identify the three largest positive contributors
-    top_three = monthly_data.nlargest(
-        3, "contribution_pp"
-    )
-
+    month_data = metrics.get_month_contributions(contributions, selected_month)
     st.markdown("#### Top Three Inflation Contributors")
+    show_top_contributors(metrics.get_top_contributors(month_data))
 
-    for _, row in top_three.iterrows():
-        st.write(
-            f"**{row['series']}**: "
-            f"{row['contribution_pp']:.2f} percentage points"
-        )
-
-    # Format the selected month for display in the chart title
-    formatted_month = pd.to_datetime(
-        selected_month
-    ).strftime("%B %Y")
-
-    # Draw the contribution chart
-    fig_contributions = px.bar(
-        monthly_data,
-        x="contribution_pp",
-        y="series",
-        orientation="h",
-        title=f"Inflation Contributions — {formatted_month}",
-        labels={
-            "contribution_pp": "Contribution (percentage points)",
-            "series": "Expenditure Category"
-        }
+    fig = plots.create_contribution_bar_chart(
+        month_data, selected_month.strftime("%B %Y")
     )
+    st.plotly_chart(fig, use_container_width=True)
 
-    st.plotly_chart(fig_contributions, use_container_width=True)
 
-    # --------------------------------------------
-    # Stacked contributions over time
-    # --------------------------------------------
-
+def render_contributions_over_time(contributions):
+    """Let users pick a date range and show stacked monthly contributions."""
     st.subheader("Inflation Contributions Over Time")
-
-    # Create a copy so the existing monthly chart is unaffected
-    contributions_time = contributions.copy()
-
-    # Convert dates to datetime format
-    contributions_time["date"] = pd.to_datetime(
-        contributions_time["date"]
-    )
-
-    # Get the months available in our dataset
-    available_months = sorted(
-        contributions_time["date"].dt.date.unique()
-    )
-
-    # Allow users to choose a start and end month
+    available_months = sorted(contributions["date"].dt.date.unique())
     range_start, range_end = st.select_slider(
         "Choose a date range",
         options=available_months,
         value=(
             pd.Timestamp("2022-01-01").date(),
-            pd.Timestamp("2023-12-01").date()
+            pd.Timestamp("2023-12-01").date(),
         ),
-        format_func=lambda d: d.strftime("%b %Y")
+        format_func=lambda d: d.strftime("%b %Y"),
     )
-
-    # Warn users whenever the selected range includes 2024
     if range_start.year <= 2024 <= range_end.year:
         st.warning(
             "The selected period includes 2024, when approximate "
@@ -307,366 +145,141 @@ with tab2:
             "Interpret contribution estimates with additional caution."
         )
 
-    # Filter the data to the selected period
-    filtered_contributions = contributions_time[
-        (contributions_time["date"] >= pd.Timestamp(range_start))
-        & (contributions_time["date"] <= pd.Timestamp(range_end))
-    ]
-
-    # Build a stacked bar chart
-    fig_stacked = px.bar(
-        filtered_contributions,
-        x="date",
-        y="contribution_pp",
-        color="series",
-        barmode="relative",
-        title="Monthly Inflation Contributions by Category",
-        labels={
-            "date": "Month",
-            "contribution_pp": "Contribution (percentage points)",
-            "series": "Expenditure Category"
-        }
-    )
-
-    # Improve the chart appearance
-    fig_stacked.update_layout(
-        height=550,
-        xaxis_tickformat="%b %Y",
-        legend_title_text="Expenditure Category"
-    )
-
-    fig_stacked.add_hline(
-        y=0,
-        line_color="gray",
-        line_width=1
-    )
-
-    st.plotly_chart(fig_stacked, use_container_width=True)
-
+    in_range = metrics.filter_date_range(contributions, range_start, range_end)
+    fig = plots.create_stacked_contribution_chart(in_range)
+    st.plotly_chart(fig, use_container_width=True)
     st.caption(
         "Positive contributions increase headline inflation, "
         "while negative contributions offset it. "
         "The expenditure-weight regime changes around 2024; "
         "contributions across regimes require caution."
     )
-
-
-    # Explain the CPI expenditure-weight methodology
     st.caption(
         "Inflation contributions are estimated using CPI expenditure weights. "
         "The expenditure basket was updated around 2024, so contribution "
         "magnitudes across different weighting periods are not directly comparable."
     )
-#_____________________________________________________________
-# Dashboard Section: Income Group Inflation Comparison
 
-with tab4:
-    # Display a subheader for the income group inflation
-    st.subheader("Rich vs Poor: Inflation by Income Group")
 
-    # Provide context for the income group comparison
+def render_contributions_tab(contributions):
+    """Tab 2: what drove inflation, for one month and over time."""
+    st.subheader("What Drove Inflation?")
     st.info(
-    "In 2026 1H, the lowest-minus-highest income inflation gap "
-    "was -0.43 pp. Education and Health had the largest negative "
-    "category gaps, while Transport had the largest positive gap."
+        "Transport, Food, and Housing & Utilities ranked highest "
+        "in the 2022–23 surge, while Housing & Utilities, Food, "
+        "and Transport ranked highest in the 2024–26 cooling."
+    )
+    render_single_month_contributions(contributions)
+    render_contributions_over_time(contributions)
+
+
+def render_cumulative_tab(category_inflation):
+    """Tab 3: cumulative price change of each category since January 2019."""
+    st.info(
+        "Since January 2019, Transport (51.7%), Food (23.1%), "
+        "and Housing & Utilities (18.2%) had the largest category "
+        "CPI increases through August 2026."
+    )
+    st.subheader("How Much Have Prices Increased Since 2019?")
+    cumulative = metrics.calculate_cumulative_change(category_inflation)
+    latest = metrics.get_latest_month_rows(cumulative)
+    st.plotly_chart(
+        plots.create_cumulative_change_chart(latest), use_container_width=True
+    )
+    st.caption(
+        f"Percentage changes from January 2019 to "
+        f"{latest['date'].max():%B %Y}, "
+        "calculated using CPI indices (2024 = 100)."
     )
 
-    # Load processed income-group data
-    income = pd.read_csv(
-        "outputs/tables/income_group_inflation_gaps.csv"
-    )
 
-
-    # Let users choose which household income groups to compare
+def render_income_group_rates(income_gaps):
+    """Let users pick income groups and show their inflation rates."""
     income_groups = st.multiselect(
         "Select household income groups",
-        ["Lowest 20%", "Middle 60%", "Highest 20%"],
-        default=["Lowest 20%", "Middle 60%", "Highest 20%"]
+        INCOME_GROUPS,
+        default=INCOME_GROUPS,
     )
-
-    # Plot only the selected income groups
-    if income_groups:
-        fig_income = px.line(
-            income,
-            x="period",
-            y=income_groups,
-            markers=True,
-            title="Inflation Rates by Household Income Group",
-            labels={
-                "period": "Half-Year Period",
-                "value": "Inflation Rate (%)",
-                "variable": "Income Group"
-            }
-        )
-
-        st.plotly_chart(fig_income, use_container_width=True)
-    else:
+    if not income_groups:
         st.warning("Please select at least one income group.")
+        return
+    fig = plots.create_income_group_line_chart(income_gaps, income_groups)
+    st.plotly_chart(fig, use_container_width=True)
 
 
-    # Create a bar chart to visualize the inflation gap between the
-    # lowest and highest income groups
+def render_income_gap(income_gaps):
+    """Show the lowest-minus-highest income inflation gap."""
     st.subheader("Inflation Gap Between Income Groups")
-
-    fig_gap = px.bar(
-        income,
-        x="period",
-        y="gap_low_minus_high_pp",
-        title="Inflation Gap: Lowest 20% Minus Highest 20%",
-        labels={
-            "period": "Half-Year Period",
-            "gap_low_minus_high_pp": "Inflation Gap (percentage points)"
-        }
+    st.plotly_chart(
+        plots.create_income_gap_bar_chart(income_gaps), use_container_width=True
     )
 
-    # Add a zero reference line
-    fig_gap.add_hline(
-        y=0,
-        line_dash="dash",
-        line_color="gray"
-    )
 
-    st.plotly_chart(fig_gap, use_container_width=True)
-
-    #_____________________________________________________________
-    # Dashboard Section: Category Inflation Differences
+def render_category_gaps(drivers):
+    """Let users pick a half-year and show category inflation gaps."""
     st.subheader("Which Categories Show the Largest Income-Group Differences?")
-
-    # Load category-level inflation differences
-    drivers = pd.read_csv(
-        "outputs/tables/income_gap_drivers.csv"
-    )
-
-    # Create a list of available half-year periods
     periods = drivers["period"].unique().tolist()
-
-    # Let the user choose a period
     selected_period = st.selectbox(
         "Choose a half-year period",
         periods,
-        index=periods.index("2022 2H")
+        index=periods.index("2022 2H"),
     )
-
-    # Keep only observations for the selected period
-    selected_drivers = drivers[
-        drivers["period"] == selected_period
-    ]
-
-    # Sort category differences
-    selected_drivers = selected_drivers.sort_values(
-        "rate_gap_low_minus_high_pp",
-        ascending=True
-    )
-
-    # Create a horizontal bar chart
-    fig_drivers = px.bar(
-        selected_drivers,
-        x="rate_gap_low_minus_high_pp",
-        y="series",
-        orientation="h",
-        title=f"Category Inflation Differences — {selected_period}",
-        labels={
-            "rate_gap_low_minus_high_pp": "Lowest 20% minus Highest 20% (pp)",
-            "series": "Expenditure Category"
-        }
-    )
-
-    # Zero means equal category inflation rates
-    fig_drivers.add_vline(
-        x=0,
-        line_dash="dash",
-        line_color="gray"
-    )
-
-    st.plotly_chart(fig_drivers, use_container_width=True)
-
+    period_drivers = metrics.get_period_gap_drivers(drivers, selected_period)
+    fig = plots.create_category_gap_bar_chart(period_drivers, selected_period)
+    st.plotly_chart(fig, use_container_width=True)
     st.caption(
         "Bars show differences in category inflation rates, "
         "not contributions to the overall household inflation gap."
     )
 
-#_____________________________________________________________
 
-with tab3:
-
+def render_income_tab(income_gaps, drivers):
+    """Tab 4: inflation by household income group."""
+    st.subheader("Rich vs Poor: Inflation by Income Group")
     st.info(
-    "Since January 2019, Transport (51.7%), Food (23.1%), "
-    "and Housing & Utilities (18.2%) had the largest category "
-    "CPI increases through August 2026."
+        "In 2026 1H, the lowest-minus-highest income inflation gap "
+        "was -0.43 pp. Education and Health had the largest negative "
+        "category gaps, while Transport had the largest positive gap."
     )
+    render_income_group_rates(income_gaps)
+    render_income_gap(income_gaps)
+    render_category_gaps(drivers)
 
-    # Dashboard Section: Cumulative Price Changes Since 2019
-    st.subheader("How Much Have Prices Increased Since 2019?")
 
-    # Select CPI observations from January 2019
-    baseline = df[
-        df["date"] == "2019-01-01"
-    ][["series", "cpi"]]
+def render_comparison_chart(fig, label, series_names):
+    """Let users choose which lines of a comparison chart to show."""
+    options = list(series_names.values())
+    selected = st.multiselect(label, options, default=options)
+    plots.show_selected_traces(fig, selected)
+    st.plotly_chart(fig, use_container_width=True)
 
-    # Rename the baseline CPI column
-    baseline = baseline.rename(
-        columns={"cpi": "cpi_2019"}
-    )
 
-    # Attach the January 2019 CPI to every observation
-    cumulative = df.merge(
-        baseline,
-        on="series",
-        how="left"
-    )
-
-    # Calculate cumulative percentage change since January 2019
-    cumulative["cumulative_pct"] = (
-        (cumulative["cpi"] / cumulative["cpi_2019"] - 1) * 100
-    )
-
-    # Find the latest observation for each category
-    latest_date = cumulative["date"].max()
-
-    latest_cumulative = cumulative[
-        cumulative["date"] == latest_date
-    ]
-
-    # Sort categories by cumulative price increase
-    latest_cumulative = latest_cumulative.sort_values(
-        "cumulative_pct",
-        ascending=True
-    )
-
-    # Create a horizontal bar chart
-    fig_cumulative = px.bar(
-        latest_cumulative,
-        x="cumulative_pct",
-        y="series",
-        orientation="h",
-        title="Cumulative Price Changes Since January 2019",
-        labels={
-            "cumulative_pct": "Cumulative Price Change (%)",
-            "series": "Expenditure Category"
-        }
-    )
-
-    st.plotly_chart(fig_cumulative, use_container_width=True)
-
-    st.caption(
-        f"Percentage changes from January 2019 to "
-        f"{latest_date.strftime('%B %Y')}, "
-        "calculated using CPI indices (2024 = 100)."
-    )
-
-#_____________________________________________________________
-# Dashboard Section: Behind the Numbers
-
-with tab5:
+def render_behind_numbers_tab(transport_coe, accommodation_rent):
+    """Tab 5: CPI groups compared with COE premiums and HDB rents."""
     st.subheader("Behind the Numbers: COE Premiums and HDB Rents")
-    # Provide context for the COE and HDB comparisons
     st.info(
-    "Since February 2021, the Private Transport CPI and COE "
-    "premium indexes both rose, reaching 150.0 and 292.0, "
-    "respectively, in August 2026."
+        "Since February 2021, the Private Transport CPI and COE "
+        "premium indexes both rose, reaching 150.0 and 292.0, "
+        "respectively, in August 2026."
     )
-
-    # Load the processed comparison datasets
-    transport_coe = pd.read_csv(
-        "outputs/tables/transport_vs_coe.csv"
-    )
-
-    accommodation_rent = pd.read_csv(
-        "outputs/tables/accommodation_vs_hdb_rent.csv"
-    )
-
-    # Convert the date columns to datetime
-    transport_coe["date"] = pd.to_datetime(transport_coe["date"])
-    accommodation_rent["date"] = pd.to_datetime(accommodation_rent["date"])
-
-    # Chart 1: Transport CPI versus COE premiums
-    fig_coe = px.line(
-        transport_coe,
-        x="date",
-        y=["transport_cpi_index", "coe_premium_index"],
-        title="Private Transport CPI vs COE Premiums",
-        labels={
-            "date": "Date",
-            "value": "Index (February 2021 = 100)",
-            "variable": "Series"
-        }
-    )
-
-    fig_coe.for_each_trace(
-        lambda trace: trace.update(
-            name={
-                "transport_cpi_index": "Private Transport CPI",
-                "coe_premium_index": "COE Premiums (Categories A & B)"
-            }.get(trace.name, trace.name)
-        )
-    )
-
-
-    # Let users choose which Transport comparison lines appear
-    transport_series = st.multiselect(
+    render_comparison_chart(
+        plots.create_transport_coe_chart(transport_coe),
         "Choose Transport comparison series",
-        ["Private Transport CPI", "COE Premiums (Categories A & B)"],
-        default=["Private Transport CPI", "COE Premiums (Categories A & B)"]
+        plots.TRANSPORT_SERIES_NAMES,
     )
-
-    # Show only the selected lines
-    fig_coe.for_each_trace(
-        lambda trace: trace.update(
-            visible=trace.name in transport_series
-        )
-    )
-
-
-    st.plotly_chart(fig_coe, use_container_width=True)
-
-    # Chart 2: Accommodation CPI versus HDB rents
-    fig_rent = px.line(
-        accommodation_rent,
-        x="date",
-        y=["accommodation_cpi_index", "hdb_rent_index"],
-        title="Accommodation CPI vs HDB Rents",
-        labels={
-            "date": "Date",
-            "value": "Index (February 2021 = 100)",
-            "variable": "Series"
-        }
-    )
-
-    fig_rent.for_each_trace(
-        lambda trace: trace.update(
-            name={
-                "accommodation_cpi_index": "Accommodation CPI",
-                "hdb_rent_index": "HDB Median Rents"
-            }.get(trace.name, trace.name)
-        )
-    )
-
-
-    # Let users choose which housing comparison lines appear
-    rent_series = st.multiselect(
+    render_comparison_chart(
+        plots.create_accommodation_rent_chart(accommodation_rent),
         "Choose Housing comparison series",
-        ["Accommodation CPI", "HDB Median Rents"],
-        default=["Accommodation CPI", "HDB Median Rents"]
+        plots.RENT_SERIES_NAMES,
     )
-
-    # Show only the selected lines
-    fig_rent.for_each_trace(
-        lambda trace: trace.update(
-            visible=trace.name in rent_series
-        )
-    )
-
-
-    st.plotly_chart(fig_rent, use_container_width=True)
-
     st.caption(
         "All series are rebased to February 2021 = 100. "
         "These comparisons are descriptive and do not establish causation."
     )
 
-# Dashboard methodology and data sources
-with st.expander("Data Sources and Methodology"):
 
+def render_methodology_text():
+    """Write the data sources, definitions, limitations and linking notes."""
     st.markdown("""
     ### Data Sources
     - Singapore Department of Statistics (SingStat):
@@ -698,7 +311,6 @@ with st.expander("Data Sources and Methodology"):
     - COE premiums and HDB rents are descriptive comparisons;
       their co-movement does not establish causation.
     """)
-        # Explain the CPI linking methodology
     st.markdown("""
     ### CPI Series Linking
 
@@ -716,43 +328,66 @@ with st.expander("Data Sources and Methodology"):
     **Residual = Headline inflation - Sum of contributions**
     """)
 
-    # Load the residual-check table
-    residuals = pd.read_csv(
-        "outputs/tables/contribution_residual_check.csv"
-    )
 
-    residuals["date"] = pd.to_datetime(residuals["date"])
-
-    # Calculate absolute residuals
-    residuals["abs_residual"] = residuals["residual_pp"].abs()
-
-    # Calculate how often the residual is below 0.3 pp
-    pct_below = (
-        (residuals["abs_residual"] < 0.3).mean() * 100
-    )
-
-    # Find the largest absolute residual
-    largest_row = residuals.loc[
-        residuals["abs_residual"].idxmax()
-    ]
-
+def render_residual_summary(residuals):
+    """Show how close the summed contributions are to headline inflation."""
+    largest = metrics.get_largest_residual(residuals)
     col1, col2 = st.columns(2)
-
     with col1:
         st.metric(
             "Months with |Residual| < 0.3 pp",
-            f"{pct_below:.1f}%"
+            f"{metrics.share_of_small_residuals(residuals):.1f}%",
         )
-
     with col2:
         st.metric(
             "Largest Absolute Residual",
-            f"{largest_row['abs_residual']:.2f} pp"
+            f"{abs(largest['residual_pp']):.2f} pp",
         )
-
     st.caption(
-            "Largest residual occurred in "
-            f"{largest_row['date']:%B %Y}. "
-            "Residuals measure the accuracy of the approximate "
-            "contribution decomposition, not errors in CPI linking."
+        "Largest residual occurred in "
+        f"{largest['date']:%B %Y}. "
+        "Residuals measure the accuracy of the approximate "
+        "contribution decomposition, not errors in CPI linking."
+    )
+
+
+def render_methodology_section(residuals):
+    """Expander with methodology notes and the residual check."""
+    with st.expander("Data Sources and Methodology"):
+        render_methodology_text()
+        render_residual_summary(residuals)
+
+
+def main():
+    """Load the tables and lay out the five dashboard tabs."""
+    category_inflation = load_data.load_category_inflation()
+    contributions = load_data.load_contributions()
+
+    st.title("Singapore CPI Dashboard")
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "Overview & Category Explorer",
+        "What Drove Inflation?",
+        "Cumulative Price Changes",
+        "Rich vs Poor",
+        "Behind the Numbers",
+    ])
+    with tab1:
+        render_overview_tab(category_inflation, contributions)
+    with tab2:
+        render_contributions_tab(contributions)
+    with tab3:
+        render_cumulative_tab(category_inflation)
+    with tab4:
+        render_income_tab(
+            load_data.load_income_group_gaps(),
+            load_data.load_income_gap_drivers(),
         )
+    with tab5:
+        render_behind_numbers_tab(
+            load_data.load_transport_vs_coe(),
+            load_data.load_accommodation_vs_rent(),
+        )
+    render_methodology_section(load_data.load_residual_check())
+
+
+main()

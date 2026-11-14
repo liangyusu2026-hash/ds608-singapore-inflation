@@ -9,6 +9,7 @@ What I used it for:
 - Git/GitHub: gave step-by-step instructions for setting up the repo, branches and pull requests, which I typed and ran myself.
 - Review: helped me review the Stage 2 analysis PR (wrote a check script that reproduced the tables and found the 2019-weight basis issue).
 - Final check: compared the repo against the proposal and listed gaps to fix.
+- Final restructure: following the TA's advice, Claude split app.py into src/load_data.py, src/metrics.py and src/plots.py (one function per job), added src/save_figures.py, and drafted the full README. I checked that the dashboard shows exactly the same charts and text as before, and checked every README number against outputs/tables.
 
 What I did myself / how I checked it:
 - Ran wrangle.py myself and checked the processed files against the raw data.
